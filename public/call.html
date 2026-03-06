@@ -2,149 +2,121 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Private Call</title>
+<title>Audio Call</title>
 
 <style>
 body{
 background:#0f0f0f;
 color:white;
-font-family:Arial;
-text-align:center;
+font-family:sans-serif;
+display:flex;
+flex-direction:column;
+align-items:center;
+justify-content:center;
+height:100vh;
+margin:0;
 }
 
-video{
-width:45%;
-max-width:400px;
-background:black;
-border-radius:12px;
-margin:10px;
+input{
+font-size:30px;
+text-align:center;
+letter-spacing:10px;
+padding:12px;
+border-radius:10px;
+border:none;
+background:#1b1b1b;
+color:white;
+width:200px;
 }
 
 button{
-padding:12px;
-margin:8px;
+margin-top:15px;
+padding:12px 24px;
 border:none;
-border-radius:8px;
+border-radius:10px;
 background:#00c853;
 color:white;
 font-size:16px;
+}
+
+.status{
+margin-top:20px;
+opacity:.7;
 }
 </style>
 </head>
 
 <body>
 
-<h2>Private Call</h2>
+<h2>Audio Call</h2>
 
-<div>
-<video id="remoteVideo" autoplay playsinline></video>
-<video id="localVideo" autoplay muted playsinline></video>
-</div>
+<input id="room" maxlength="4" placeholder="0000">
 
-<div>
-<button onclick="enableMic()">Enable Mic</button>
-<button onclick="enableCamera()">Enable Camera</button>
-</div>
+<br>
+
+<button onclick="join()">Join</button>
+
+<div class="status" id="status">Idle</div>
+
+<audio id="remoteAudio" autoplay></audio>
 
 <script src="/socket.io/socket.io.js"></script>
 
 <script>
 
-const room = location.hash.replace("#","") || "room";
+const socket = io()
+let pc
+let stream
 
-const socket = io();
+async function join(){
 
-const pc = new RTCPeerConnection({
-iceServers:[
-{urls:"stun:stun.l.google.com:19302"}
-]
-});
+const room=document.getElementById("room").value
 
-let localStream = new MediaStream();
+stream=await navigator.mediaDevices.getUserMedia({audio:true})
 
-document.getElementById("localVideo").srcObject = localStream;
+pc=new RTCPeerConnection({
+iceServers:[{urls:"stun:stun.l.google.com:19302"}]
+})
 
-pc.ontrack = e=>{
-document.getElementById("remoteVideo").srcObject = e.streams[0];
-};
+stream.getTracks().forEach(t=>pc.addTrack(t,stream))
 
-pc.onicecandidate = e=>{
+pc.ontrack=e=>{
+remoteAudio.srcObject=e.streams[0]
+}
+
+pc.onicecandidate=e=>{
 if(e.candidate){
-socket.emit("ice", e.candidate);
+socket.emit("ice",{room,candidate:e.candidate})
 }
-};
-
-socket.emit("join", room);
-
-socket.on("offer", async offer=>{
-await pc.setRemoteDescription(offer);
-
-const answer = await pc.createAnswer({
-offerToReceiveAudio:true,
-offerToReceiveVideo:true
-});
-
-await pc.setLocalDescription(answer);
-
-socket.emit("answer", answer);
-});
-
-socket.on("answer", async answer=>{
-await pc.setRemoteDescription(answer);
-});
-
-socket.on("ice", async candidate=>{
-try{
-await pc.addIceCandidate(candidate);
-}catch{}
-});
-
-socket.on("ready", async ()=>{
-
-const offer = await pc.createOffer({
-offerToReceiveAudio:true,
-offerToReceiveVideo:true,
-voiceActivityDetection:true
-});
-
-await pc.setLocalDescription(offer);
-
-socket.emit("offer", offer);
-
-});
-
-async function enableMic(){
-
-const stream = await navigator.mediaDevices.getUserMedia({
-audio:{
-echoCancellation:true,
-noiseSuppression:true,
-autoGainControl:true
-},
-video:false
-});
-
-stream.getTracks().forEach(track=>{
-pc.addTrack(track, stream);
-localStream.addTrack(track);
-});
-
 }
 
-async function enableCamera(){
+socket.emit("join",room)
 
-const stream = await navigator.mediaDevices.getUserMedia({
-video:{
-width:{ideal:1280},
-height:{ideal:720},
-frameRate:{ideal:30,max:30}
-}
-});
+socket.on("offer",async offer=>{
+await pc.setRemoteDescription(offer)
+const answer=await pc.createAnswer()
+await pc.setLocalDescription(answer)
+socket.emit("answer",{room,answer})
+})
 
-stream.getTracks().forEach(track=>{
-pc.addTrack(track, stream);
-localStream.addTrack(track);
-});
+socket.on("answer",async answer=>{
+await pc.setRemoteDescription(answer)
+})
+
+socket.on("ice",async candidate=>{
+await pc.addIceCandidate(candidate)
+})
+
+socket.on("ready",async ()=>{
+
+const offer=await pc.createOffer()
+await pc.setLocalDescription(offer)
+
+socket.emit("offer",{room,offer})
+
+})
+
+status.innerText="Connecting..."
 
 }
 
